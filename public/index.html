@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Trading Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .dark {
+            background-color: #1a1b1e;
+            color: #e4e5e7;
+        }
+    </style>
+</head>
+<body class="dark min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold mb-2">Solana Trading Bot</h1>
+            <p class="text-gray-400">Advanced transaction monitoring and automated trading</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Connection Panel -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Connection Status</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400">Bot Wallet</label>
+                        <div id="botWalletStatus" class="mt-1 text-sm">Not connected</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400">Target Wallet</label>
+                        <input type="text" id="targetWalletInput" 
+                               class="mt-1 block w-full rounded-md bg-gray-700 border-gray-600 text-white px-3 py-2"
+                               placeholder="Enter target wallet address">
+                    </div>
+                    <div class="flex space-x-4">
+                        <button id="connectWalletBtn" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md">
+                            Connect Wallet
+                        </button>
+                        <button id="startBtn" disabled
+                                class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md disabled:opacity-50">
+                            Start Monitoring
+                        </button>
+                        <button id="stopBtn" disabled
+                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md disabled:opacity-50">
+                            Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Panel -->
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Bot Status</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400">Status</label>
+                        <div id="botStatus" class="mt-1 text-sm">Stopped</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400">Active Since</label>
+                        <div id="activeSince" class="mt-1 text-sm">-</div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400">Transactions Monitored</label>
+                        <div id="txCount" class="mt-1 text-sm">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transactions Panel -->
+            <div class="bg-gray-800 rounded-lg p-6 md:col-span-2">
+                <h2 class="text-xl font-semibold mb-4">Recent Transactions</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700">
+                        <thead>
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Time</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Type</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Amount</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionsTable" class="divide-y divide-gray-700">
+                            <!-- Transactions will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let txCount = 0;
+        let startTime = null;
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            
+            ws.onopen = () => {
+                console.log('Connected to server');
+                updateStatus('Connected');
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
+            
+            ws.onclose = () => {
+                console.log('Disconnected from server');
+                updateStatus('Disconnected');
+                setTimeout(connect, 1000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Error: ' + error.message);
+            };
+        }
+
+        function handleMessage(message) {
+            switch (message.type) {
+                case 'status':
+                    handleStatusUpdate(message.data);
+                    break;
+                case 'trade_executed':
+                    handleTradeUpdate(message.data);
+                    break;
+                case 'error':
+                    console.error('Server error:', message.message);
+                    updateStatus('Error: ' + message.message);
+                    break;
+            }
+        }
+
+        function handleStatusUpdate(data) {
+            if (data.botWallet) {
+                document.getElementById('botWalletStatus').textContent = 
+                    `Connected: ${data.botWallet.slice(0, 4)}...${data.botWallet.slice(-4)}`;
+                document.getElementById('startBtn').disabled = false;
+            }
+
+            if (data.status === 'running') {
+                document.getElementById('botStatus').textContent = 'Running';
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                if (!startTime) {
+                    startTime = new Date();
+                    document.getElementById('activeSince').textContent = startTime.toLocaleTimeString();
+                }
+            } else if (data.status === 'stopped') {
+                document.getElementById('botStatus').textContent = 'Stopped';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                startTime = null;
+                document.getElementById('activeSince').textContent = '-';
+            }
+        }
+
+        function handleTradeUpdate(trade) {
+            txCount++;
+            document.getElementById('txCount').textContent = txCount;
+
+            const table = document.getElementById('transactionsTable');
+            const row = table.insertRow(0);
+            
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-sm">${new Date(trade.timestamp).toLocaleTimeString()}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">${trade.type}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">${trade.amount || '-'}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                        ${trade.status}
+                    </span>
+                </td>
+            `;
+
+            // Keep only last 10 transactions
+            while (table.rows.length > 10) {
+                table.deleteRow(table.rows.length - 1);
+            }
+        }
+
+        function updateStatus(status) {
+            document.getElementById('botStatus').textContent = status;
+        }
+
+        // Event Listeners
+        document.getElementById('connectWalletBtn').addEventListener('click', () => {
+            ws.send(JSON.stringify({ type: 'wallet_connect' }));
+        });
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+            const targetWallet = document.getElementById('targetWalletInput').value.trim();
+            if (!targetWallet) {
+                alert('Please enter a target wallet address');
+                return;
+            }
+            ws.send(JSON.stringify({ 
+                type: 'start',
+                targetWallet
+            }));
+        });
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            ws.send(JSON.stringify({ type: 'stop' }));
+        });
+
+        // Connect on load
+        connect();
+    </script>
+</body>
+</html>
